@@ -8,13 +8,13 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"github.com/steelseries/golisp"
+	. "github.com/steelseries/golisp"
 	"math"
 	"math/big"
+	"os"
+	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -36,52 +36,11 @@ func loadLispCode() {
 	}
 }
 
-func dump(node ast.Expr) {
-	binaryExpr := node.(BinaryExpr)
-}
-
-//============================  STACK
-
-type Stack []interface{}
-
-func (stack *Stack) Pop() (interface{}, error) {
-	theStack := *stack
-	if len(theStack) == 0 {
-		return nil, errors.New("can't Pop() an empty stack")
-	}
-	x := theStack[len(theStack)-1]
-	*stack = theStack[:len(theStack)-1]
-	return x, nil
-}
-
-func (stack *Stack) Push(x interface{}) {
-	*stack = append(*stack, x)
-}
-
-func (stack Stack) Top() (interface{}, error) {
-	if len(stack) == 0 {
-		return nil, errors.New("can't Top() an empty stack")
-	}
-	return stack[len(stack)-1], nil
-}
-
-func (stack Stack) Cap() int {
-	return cap(stack)
-}
-
-func (stack Stack) Len() int {
-	return len(stack)
-}
-
-func (stack Stack) IsEmpty() bool {
-	return len(stack) == 0
-}
-
 //============================  EVALUATOR
 
 var whitespace_rx = regexp.MustCompile(`\s+`)
 var fp_rx = regexp.MustCompile(`(\d+(?:\.\d+)?)`) // simple fp number
-var func_rx = regexp.MustCompile(`([:alpha:]+)`)
+var func_rx = regexp.MustCompile(`([a-zA-Z-_*]+)`)
 var operators = "-+**/<>"
 
 // prec returns the operator's precedence
@@ -118,12 +77,24 @@ func isLispFunction(token string) bool {
 }
 
 // convert2postfix converts an infix expression to postfix
-func convert2postfix(tokens []string) []string {
-	var stack stack.Stack
-	var result []string
+func convert2postfix(tokens []string) (result []string, err error) {
+	var stack Stack
+	var functionName = ""
+	var inArgList = false
+
 	for _, token := range tokens {
 
 		if isLispFunction(token) {
+			f := Global.ValueOf(SymbolWithName(token))
+			if NilP(f) {
+				err = errors.New(fmt.Sprintf("No function named %s", token))
+				return
+			} else {
+				functionName = token
+				inArgList = true
+			}
+
+		} else if token == "," {
 
 		} else if isOperator(token) {
 
@@ -154,6 +125,9 @@ func convert2postfix(tokens []string) []string {
 					result = append(result, pop.(string))
 				} else {
 					stack.Pop() // pop off "("
+					if inArgList {
+						result = append(result, functionName)
+					}
 					break PAREN
 				}
 			}
@@ -169,12 +143,12 @@ func convert2postfix(tokens []string) []string {
 		result = append(result, pop.(string))
 	}
 
-	return result
+	return
 }
 
 // evaluatePostfix takes a postfix expression and evaluates it
 func evaluatePostfix(postfix []string) (*big.Rat, error) {
-	var stack stack.Stack
+	var stack Stack
 	result := new(big.Rat) // note: a new(big.Rat) has value "0/1" ie zero
 	for _, token := range postfix {
 		if isOperand(token) {
@@ -228,7 +202,35 @@ func evaluatePostfix(postfix []string) (*big.Rat, error) {
 			}
 		} else if isLispFunction(token) {
 			//"(<token> <float1> <float2>...)"
+			f := Global.ValueOf(SymbolWithName(token))
+			var numberOfArgs = 0
+			if f == nil {
+				//error: no function
+			} else if TypeOf(f) == FunctionType {
+				numberOfArgs = f.Func.RequiredArgCount
+			} else if TypeOf(f) == PrimitiveType {
+				numberOfArgs = f.Prim.NumberOfArgs
+			} else {
+				// error: non-function
+			}
 
+			var args []*Data
+
+			// collect args
+			for i := 0; i < numberOfArgs; i++ {
+				op, err := stack.Pop()
+				if err != nil {
+					return nil, err
+				}
+				float := BigratToFloat(op.(*big.Rat))
+				args = append(args, FloatWithValue(float32(float)))
+			}
+			val, err := Apply(f, ArrayToList(args), Global)
+			if err != nil {
+				return nil, err
+			}
+			result = FloatToBigrat(float64(FloatValue(val)))
+			stack.Push(result)
 		} else {
 			return nil, fmt.Errorf("unknown token %v", token)
 		}
@@ -248,7 +250,7 @@ func evaluatePostfix(postfix []string) (*big.Rat, error) {
 //
 func tokenise(expr string) []string {
 	spaced := fp_rx.ReplaceAllString(expr, " ${1} ")
-	symbols := []string{"(", ")"}
+	symbols := []string{"(", ")", ","}
 	for _, symbol := range symbols {
 		spaced = strings.Replace(spaced, symbol, fmt.Sprintf(" %s ", symbol), -1)
 	}
@@ -271,7 +273,10 @@ func EvalEquation(expr string) (result *big.Rat, err error) {
 	}()
 
 	tokens := tokenise(expr)
-	postfix := convert2postfix(tokens)
+	postfix, err := convert2postfix(tokens)
+	if err != nil {
+		return
+	}
 	return evaluatePostfix(postfix)
 }
 
@@ -284,22 +289,18 @@ func ioLoop() {
 	lastInput := ""
 	for true {
 		input := *ReadLine(&prompt)
-		if input != "" {
+		if input == "quit" {
+			return
+		} else if input != "" {
 			if input != lastInput {
 				AddHistory(input)
 			}
 			lastInput = input
-			ast, err := ParseExpr(input)
-			dump(ast)
+			result, err := EvalEquation(input)
 			if err != nil {
-				fmt.Printf("Error: %s\n", err)
+				fmt.Printf("Error in evaluation: %s\n", err)
 			} else {
-				d, err := EvalEquation(code, Global)
-				if err != nil {
-					fmt.Printf("Error in evaluation: %s\n", err)
-				} else {
-					fmt.Printf("==> %s\n", String(d))
-				}
+				fmt.Printf("==> %v\n", result)
 			}
 		}
 	}
