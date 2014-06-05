@@ -11,12 +11,10 @@ func init() {
 }
 
 func GoFactImpl(args *Data, env *SymbolTableFrame) (result *Data, err error) {
-	println(String(args))
 	val, err := Eval(Car(args), env)
 	if err != nil {
 		return
 	}
-	println(String(val))
 	if !FloatP(val) {
 		return nil, errors.New("go-fact requires a float argument")
 	}

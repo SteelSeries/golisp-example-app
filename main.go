@@ -223,7 +223,7 @@ func evaluatePostfix(postfix []string) (*big.Rat, error) {
 				float := BigratToFloat(op.(*big.Rat))
 				args = append(args, FloatWithValue(float32(float)))
 			}
-			val, err := Apply(f, ArrayToList(args), Global)
+			val, err := Apply(f, Reverse(ArrayToList(args)), Global)
 			if err != nil {
 				return nil, err
 			}
