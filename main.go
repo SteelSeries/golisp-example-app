@@ -40,7 +40,7 @@ func loadLispCode() {
 
 var whitespace_rx = regexp.MustCompile(`\s+`)
 var fp_rx = regexp.MustCompile(`(\d+(?:\.\d+)?)`) // simple fp number
-var func_rx = regexp.MustCompile(`([a-zA-Z-_*]+)`)
+var func_rx = regexp.MustCompile(`([a-zA-Z\-\_]+)`)
 var operators = "-+**/<>"
 
 // prec returns the operator's precedence
@@ -79,8 +79,7 @@ func isLispFunction(token string) bool {
 // convert2postfix converts an infix expression to postfix
 func convert2postfix(tokens []string) (result []string, err error) {
 	var stack Stack
-	var functionName = ""
-	var inArgList = false
+	var functions Stack
 
 	for _, token := range tokens {
 
@@ -89,9 +88,11 @@ func convert2postfix(tokens []string) (result []string, err error) {
 			if NilP(f) {
 				err = errors.New(fmt.Sprintf("No function named %s", token))
 				return
+			} else if !FunctionP(f) {
+				err = errors.New(fmt.Sprintf("%s is not a function", token))
+				return
 			} else {
-				functionName = token
-				inArgList = true
+				functions.Push(token)
 			}
 
 		} else if token == "," {
@@ -125,8 +126,9 @@ func convert2postfix(tokens []string) (result []string, err error) {
 					result = append(result, pop.(string))
 				} else {
 					stack.Pop() // pop off "("
-					if inArgList {
-						result = append(result, functionName)
+					if !functions.IsEmpty() {
+						f, _ := functions.Pop()
+						result = append(result, f.(string))
 					}
 					break PAREN
 				}
@@ -204,14 +206,10 @@ func evaluatePostfix(postfix []string) (*big.Rat, error) {
 			//"(<token> <float1> <float2>...)"
 			f := Global.ValueOf(SymbolWithName(token))
 			var numberOfArgs = 0
-			if f == nil {
-				//error: no function
-			} else if TypeOf(f) == FunctionType {
+			if TypeOf(f) == FunctionType {
 				numberOfArgs = f.Func.RequiredArgCount
 			} else if TypeOf(f) == PrimitiveType {
 				numberOfArgs = f.Prim.NumberOfArgs
-			} else {
-				// error: non-function
 			}
 
 			var args []*Data
@@ -273,7 +271,9 @@ func EvalEquation(expr string) (result *big.Rat, err error) {
 	}()
 
 	tokens := tokenise(expr)
+	//	fmt.Printf("tokens: %v\n", tokens)
 	postfix, err := convert2postfix(tokens)
+	//	fmt.Printf("postfix: %v\n", postfix)
 	if err != nil {
 		return
 	}
