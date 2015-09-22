@@ -4,6 +4,7 @@
 
 // This package impliments a basic LISP interpretor for embedding in a go program for scripting.
 // This file provides a repl
+
 package main
 
 import (
@@ -88,7 +89,7 @@ func convert2postfix(tokens []string) (result []string, err error) {
 			if NilP(f) {
 				err = errors.New(fmt.Sprintf("No function named %s", token))
 				return
-			} else if !FunctionP(f) {
+			} else if !FunctionP(f) && !PrimitiveP(f) {
 				err = errors.New(fmt.Sprintf("%s is not a function", token))
 				return
 			} else {
@@ -207,9 +208,13 @@ func evaluatePostfix(postfix []string) (*big.Rat, error) {
 			f := Global.ValueOf(SymbolWithName(token))
 			var numberOfArgs = 0
 			if TypeOf(f) == FunctionType {
-				numberOfArgs = f.Func.RequiredArgCount
+				numberOfArgs = FunctionValue(f).RequiredArgCount
 			} else if TypeOf(f) == PrimitiveType {
-				numberOfArgs = f.Prim.NumberOfArgs
+				n, _ := fmt.Sscanf(PrimitiveValue(f).NumberOfArgs, "%d", &numberOfArgs)
+				if n != 1 {
+					return nil, fmt.Errorf("Only functions with a fixed arity can be used, %s has artiy of %s", token, PrimitiveValue(f).NumberOfArgs)
+				}
+
 			}
 
 			var args []*Data

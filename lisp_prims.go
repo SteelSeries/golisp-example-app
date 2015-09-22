@@ -7,7 +7,7 @@ import (
 
 func init() {
 	Global.BindTo(SymbolWithName("CONSTANT"), FloatWithValue(float32(42.0)))
-	MakePrimitiveFunction("go-fact", 1, GoFactImpl)
+	MakePrimitiveFunction("go-fact", "1", GoFactImpl)
 }
 
 func GoFactImpl(args *Data, env *SymbolTableFrame) (result *Data, err error) {
